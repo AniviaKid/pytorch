@@ -1,6 +1,7 @@
 import os
 from io import open
 import torch
+import re
 
 class Dictionary(object):
     def __init__(self):
@@ -20,9 +21,9 @@ class Dictionary(object):
 class Corpus(object):
     def __init__(self, path):
         self.dictionary = Dictionary()
-        self.train = self.tokenize(os.path.join(path, 'train.txt'))
-        self.valid = self.tokenize(os.path.join(path, 'valid.txt'))
-        self.test = self.tokenize(os.path.join(path, 'test.txt'))
+        self.train = self.tokenize(os.path.join(path, 'train_wiki.txt'))
+        self.valid = self.tokenize(os.path.join(path, 'valid_wiki.txt'))
+        self.test = self.tokenize(os.path.join(path, 'test_wiki.txt'))
 
     def tokenize(self, path):
         """Tokenizes a text file."""
@@ -31,6 +32,7 @@ class Corpus(object):
         with open(path, 'r', encoding="utf8") as f:
             for line in f:
                 words = line.split() + ['<eos>']
+                #words = re.split(" |!|\?|\.", line)
                 for word in words:
                     self.dictionary.add_word(word)
 
@@ -43,6 +45,51 @@ class Corpus(object):
                 for word in words:
                     ids.append(self.dictionary.word2idx[word])
                 idss.append(torch.tensor(ids).type(torch.int64))
+            ids = torch.cat(idss)
+
+        return ids
+
+
+class Test(object):
+
+    human=[]
+
+    def __init__(self):
+        self.dictionary = Dictionary()
+        self.data = self.tokenize( './data/wikitext-2/combined.csv')
+
+    def tokenize(self, path):
+        """Tokenizes a text file."""
+        assert os.path.exists(path)
+        # Add words to the dictionary
+        flag=True
+        with open(path, 'r', encoding="utf8") as f:
+            for line in f:
+                if flag:
+                    flag=False
+                else:
+                    line = line.strip()
+                    words = line.split(',')
+                    self.human.append(words[len(words)-1])
+                    words.pop()
+                    for word in words:
+                        self.dictionary.add_word(word)
+
+        # Tokenize file content
+        flag=True
+        with open(path, 'r', encoding="utf8") as f:
+            idss = []
+            for line in f:
+                if flag:
+                    flag=False
+                else:
+                    line = line.strip()
+                    words = line.split(',')
+                    words.pop()
+                    ids = []
+                    for word in words:
+                        ids.append(self.dictionary.word2idx[word])
+                    idss.append(torch.tensor(ids).type(torch.int64))
             ids = torch.cat(idss)
 
         return ids

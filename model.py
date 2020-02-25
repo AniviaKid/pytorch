@@ -6,27 +6,38 @@ import torch.nn.functional as F
 
 #隐藏层激活函数是tanh，输出层是softmax
 class FNNModel(nn.Module):
-    def __init__(self,ntoken, ninp, nhid): #词典中word的数量；每个word转为向量后的维数；隐藏层节点数
+    def __init__(self,ntoken, ninp, nhid, nlayers, dropout, flag_share): #词典中word的数量；每个word转为向量后的维数；隐藏层节点数
         super(FNNModel, self).__init__()
 
+        self.drop = nn.Dropout(dropout) #生成一个dropout函数，输入到这个函数的张量中每个元素都有dropout概率被置零
         self.encoder = nn.Embedding(ntoken, ninp) #生存一个embedding函数，这个函数会将包含有ntoken个word的字典中的每个word转化为ninp维的向量
         self.decoder = nn.Linear(nhid, ntoken) #生成一个全连接层函数，将输入为[batch_size,nhid]的张量变为[batch_size,ntoken]的张量，ntoken实际上也是全连接层神经元的个数
         self.hidden = nn.Linear(ninp,nhid);
 
         self.nhid = nhid
+        self.nlayers = nlayers
+
+        if flag_share:
+            self.encoder.weight=self.decoder.weight
+    
+    def get_embedding(self):
+        return self.encoder
+
 
 
     def forward(self, input):
         L1_output=self.encoder(input) # ntoken*ninp，第一层的输出，将文本转为向量
         hidden_input=self.hidden(L1_output) #ntoken*nhid，隐藏层的输入，已经过线性变换，尚未激活
         hidden_output=torch.tanh(hidden_input) #激活函数，隐藏层的输出，ntoken*nhid
+        #hidden_output=self.drop(hidden_output) #dropout，防止过拟合
         final_input=self.decoder(hidden_output) #输出层的输入，已经过线性变换
         #final_output=F.softmax(final_input,dim=-1)
         return final_input
 
     def init_hidden(self, bsz):
         weight = next(self.parameters())
-        return weight.new_zeros( 3, bsz, self.nhid)
+        return weight.new_zeros( self.nlayers, bsz, self.nhid)
+    
 
 
 class RNNModel(nn.Module):

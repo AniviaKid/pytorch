@@ -10,6 +10,9 @@ import torch.onnx
 import data
 import model
 
+import scipy.stats as stats
+import spearman as sp
+
 parser = argparse.ArgumentParser(description='PyTorch Wikitext-2 RNN/LSTM Language Model')
 parser.add_argument('--data', type=str, default='./data/wikitext-2',
                     help='location of the data corpus')
@@ -19,13 +22,13 @@ parser.add_argument('--emsize', type=int, default=200,
                     help='size of word embeddings')
 parser.add_argument('--nhid', type=int, default=200,
                     help='number of hidden units per layer')
-parser.add_argument('--nlayers', type=int, default=2,
+parser.add_argument('--nlayers', type=int, default=3,
                     help='number of layers')
 parser.add_argument('--lr', type=float, default=20,
                     help='initial learning rate')
 parser.add_argument('--clip', type=float, default=0.25,
                     help='gradient clipping')
-parser.add_argument('--epochs', type=int, default=10,
+parser.add_argument('--epochs', type=int, default=20,
                     help='upper epoch limit')
 parser.add_argument('--batch_size', type=int, default=20, metavar='N',
                     help='batch size')
@@ -96,14 +99,17 @@ test_data = batchify(corpus.test, eval_batch_size)
 ###############################################################################
 
 ntokens = len(corpus.dictionary)
+flag_share=True
 if args.model == 'Transformer':
     model = model.TransformerModel(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
 elif args.model == 'FNNModel':
-    model = model.FNNModel(ntokens, args.emsize, args.nhid).to(device)
+    model = model.FNNModel(ntokens, args.emsize, args.nhid,args.nlayers, args.dropout,flag_share).to(device)
 else:
     model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(device)
 
 criterion = nn.CrossEntropyLoss()
+#criterion = nn.NLLLoss()
+
 
 ###############################################################################
 # Training code
@@ -156,6 +162,10 @@ def evaluate(data_source):
             total_loss += len(data) * criterion(output_flat, targets).item()
     return total_loss / (len(data_source) - 1)
 
+lr = 0.001
+optimizer = torch.optim.Adam(model.parameters(),lr)
+
+
 
 def train():
     # Turn on training mode which enables dropout.
@@ -163,27 +173,22 @@ def train():
     total_loss = 0.
     start_time = time.time()
     ntokens = len(corpus.dictionary)
-    if args.model != 'Transformer' or args.model != 'FNNModel':
-        hidden = model.init_hidden(args.batch_size)
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
         data, targets = get_batch(train_data, i)
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         model.zero_grad()
-        if args.model == 'Transformer':
-            output = model(data)
-        elif args.model == 'FNNModel':
-                output = model(data)
-        else:
-            hidden = repackage_hidden(hidden)
-            output, hidden = model(data, hidden)
+        output = model(data)
         loss = criterion(output.view(-1, ntokens), targets)
         loss.backward()
+        optimizer.step()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
         torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-        for p in model.parameters():
-            p.data.add_(-lr, p.grad.data)
+        
+        
+        #for p in model.parameters():
+            #p.data.add_(-lr, p.grad.data)
 
         total_loss += loss.item()
 
@@ -208,7 +213,7 @@ def export_onnx(path, batch_size, seq_len):
 
 
 # Loop over epochs.
-lr = args.lr
+
 best_val_loss = None
 
 # At any point you can hit Ctrl + C to break out of training early.
@@ -227,21 +232,44 @@ try:
             with open(args.save, 'wb') as f:
                 torch.save(model, f)
             best_val_loss = val_loss
-        else:
+        #else:
             # Anneal the learning rate if no improvement has been seen in the validation dataset.
-            lr /= 4.0
+            #lr /= 4.0
 except KeyboardInterrupt:
     print('-' * 89)
     print('Exiting from training early')
 
 # Load the best saved model.
-"""with open(args.save, 'rb') as f:
+with open(args.save, 'rb') as f:
     model = torch.load(f)
     # after load the rnn params are not a continuous chunk of memory
     # this makes them a continuous chunk, and will speed up forward pass
     # Currently, only rnn model supports flatten_parameters function.
     if args.model in ['RNN_TANH', 'RNN_RELU', 'LSTM', 'GRU']:
-        model.rnn.flatten_parameters()"""
+        model.rnn.flatten_parameters()
+
+def get_spearman():
+    data, human = sp.Load_data('./data/wikitext-2/combined.csv')
+    corpus = sp.Corpus(data,human)
+    encoder = model.get_embedding()
+    word_data = batchify(corpus.train, 1)
+    vector = encoder(word_data) #ntokens*100，included repeated word
+    cosine = []
+    for i in range(0,vector.size(0)-1,2):
+        cosine.append(torch.cosine_similarity(vector[i][0],vector[i+1][0],dim=-1))
+    #f=open("./tmp_output.txt","w+")
+    #for i in range(0,len(cosine)-1):
+    #    print(cosine[i],file=f)
+    #f.close()
+    #human_float=[]
+    #cosine_float=[]
+    #for i in human:
+    #    human_float.append(math.tanh(float(i)))
+    #for i in cosine:
+    #    cosine_float.append(float(i))
+    #spearman=stats.spearmanr(cosine_float,human_float)
+    spearman=stats.spearmanr(cosine, human)
+    print(spearman)
 
 # Run on test data.
 test_loss = evaluate(test_data)
@@ -249,7 +277,10 @@ print('=' * 89)
 print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
     test_loss, math.exp(test_loss)))
 print('=' * 89)
+get_spearman()
 
 if len(args.onnx_export) > 0:
     # Export the model in ONNX format.
     export_onnx(args.onnx_export, batch_size=1, seq_len=args.bptt)
+
+
