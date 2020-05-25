@@ -248,12 +248,17 @@ with open(args.save, 'rb') as f:
     if args.model in ['RNN_TANH', 'RNN_RELU', 'LSTM', 'GRU']:
         model.rnn.flatten_parameters()
 
+def get_embedding_vector(model,input):
+    return model.encoder(input)
+
 def get_spearman():
     data, human = sp.Load_data('./data/wikitext-2/combined.csv')
     corpus = sp.Corpus(data,human)
     encoder = model.get_embedding()
+    model_input=torch.load('./model.pt')
     word_data = batchify(corpus.train, 1)
-    vector = encoder(word_data) #ntokens*100，included repeated word
+    #vector = encoder(word_data) #ntokens*100，included repeated word
+    vector = get_embedding_vector(model_input,word_data)
     cosine = []
     for i in range(0,vector.size(0)-1,2):
         cosine.append(torch.cosine_similarity(vector[i][0],vector[i+1][0],dim=-1))
@@ -277,7 +282,7 @@ print('=' * 89)
 print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
     test_loss, math.exp(test_loss)))
 print('=' * 89)
-get_spearman()
+#get_spearman()
 
 if len(args.onnx_export) > 0:
     # Export the model in ONNX format.
